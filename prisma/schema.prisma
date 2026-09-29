@@ -1,0 +1,130 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum PlanType {
+  FREE
+  PRO
+  MAX
+  ENTERPRISE
+}
+
+enum LangMode {
+  AUTO
+  EN_KO
+  JA_KO
+  ZH_KO
+  KO_EN
+}
+
+enum RecordingStatus {
+  RECORDING
+  PROCESSING
+  COMPLETED
+}
+
+model User {
+  id                  String         @id @default(cuid())
+  email               String         @unique
+  name                String
+  avatarUrl           String?
+  plan                PlanType       @default(FREE)
+  monthlySecondsTotal Int            @default(1800) // 30분 무료 체험
+  monthlySecondsUsed  Int            @default(0)
+  aiCreditsTotal      Int            @default(3)    // AI 학습팩 3회 무료
+  aiCreditsUsed       Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  subjects            Subject[]
+  recordings          Recording[]
+  ledgers             UsageLedger[]
+}
+
+model Subject {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String         // 예: "운영체제 (CS301)", "국제금융론"
+  professor   String?        // 예: "김영한 교수"
+  semester    String         @default("2026-2학기")
+  colorHex    String         @default("#3b82f6")
+  glossary    Json?          // [{ en: "deadlock", ko: "교착 상태", note: "상호 배제, 점유 대기 조건" }]
+  createdAt   DateTime       @default(now())
+
+  recordings  Recording[]
+
+  @@index([userId])
+}
+
+model Recording {
+  id              String            @id @default(cuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId       String
+  subject         Subject           @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  title           String            // 예: "04강 - 가상 메모리와 페이징 기법"
+  durationSeconds Int               @default(0)
+  langMode        LangMode          @default(EN_KO)
+  status          RecordingStatus   @default(COMPLETED)
+  audioUrl        String?
+  entryCount      Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  entries         TranscriptEntry[]
+  studyPacks      AiStudyPack[]
+  ledgers         UsageLedger[]
+
+  @@index([subjectId])
+  @@index([userId])
+}
+
+model TranscriptEntry {
+  id              String         @id @default(cuid())
+  recordingId     String
+  recording       Recording      @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  chunkSeq        Int
+  timestampMs     Int
+  timeFormatted   String         // 예: "04:12"
+  originalText    String
+  translatedText  String
+  confidence      Float          @default(0.98)
+  isKeyPoint      Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+
+  @@index([recordingId, chunkSeq])
+}
+
+model AiStudyPack {
+  id                 String         @id @default(cuid())
+  recordingId        String
+  recording          Recording      @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  summaryJson        Json           // { tldr: string, keyPoints: string[], sections: { timestamp: string, topic: string, content: string }[] }
+  examQuestionsJson  Json           // [{ id: string, type: "MULTIPLE_CHOICE"|"ESSAY", question: string, options: string[], answer: string, explanation: string, probability: "HIGH"|"MEDIUM" }]
+  flashcardsJson     Json           // [{ id: string, front: string, back: string, category: string }]
+  glossaryJson       Json           // [{ term: string, targetKo: string, definition: string }]
+  createdAt          DateTime       @default(now())
+
+  @@index([recordingId])
+}
+
+model UsageLedger {
+  id                 String         @id @default(cuid())
+  userId             String
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recordingId        String?
+  recording          Recording?     @relation(fields: [recordingId], references: [id], onDelete: SetNull)
+  secondsDeducted    Int            @default(0)
+  charsTranslated    Int            @default(0)
+  aiCreditsDeducted  Int            @default(0)
+  reason             String         // "LIVE_TRANSCRIBE", "AI_FINAL_PACK_GENERATE"
+  createdAt          DateTime       @default(now())
+
+  @@index([userId])
+}
